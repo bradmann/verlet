@@ -8,6 +8,7 @@
 			this.ctx.scale(1, -1);
 			this.ctx.translate(this.width/2, -this.height/2);
 			this.interval = Math.floor(1/fps * 1000);
+			this.ctx.textAlign = 'center';
 			//setTimeout(function(){self.tick();}, 0);
 		},
 		tick: function() {
@@ -19,25 +20,39 @@
 		},
 		draw: function() {
 			this.ctx.clearRect(-this.width/2, -this.height/2, this.width, this.height);
-			for (var idx in this.nodes) {
-				var node = this.nodes[idx];
-				this.drawNode(node);
-			}
 			for (var idx in this.links) {
 				var link = this.links[idx];
 				this.drawLink(link);
 			}
+			for (var idx in this.nodes) {
+				var node = this.nodes[idx];
+				this.drawNode(node);
+			}
 		},
 		drawNode: function(node) {
+			var pos = node['r'];
+			var vel = node['v'];
+			var force = node['f'];
+			this.ctx.fillStyle = node['c'];
 			this.ctx.beginPath();
-			this.ctx.arc(node['x'], node['y'], node['m'], 0, 2 * Math.PI, false);
+			this.ctx.arc(pos[0], pos[1], node['m'], 0, 2 * Math.PI, false);
+			this.ctx.closePath();
+			this.ctx.stroke();
 			this.ctx.fill();
+			/*var txt = "fx:" + Math.round(force[0], 2).toString() + " fy:" + Math.round(force[1], 2).toString();
+			this.ctx.save();
+			this.ctx.scale(1, -1);
+			this.ctx.fillStyle = "#000000";
+			this.ctx.fillText(txt, pos[0], - pos[1] + 20);
+			this.ctx.restore();*/
 		},
 		drawLink: function(link) {
-			var nodeA = link['a'];
-			var nodeB = link['b'];
-			this.ctx.moveTo(this.nodes[nodeA]['x'], this.nodes[nodeA]['y']);
-			this.ctx.lineTo(this.nodes[nodeB]['x'], this.nodes[nodeB]['y']);
+			var posA = this.nodes[link['a']]['r'];
+			var posB = this.nodes[link['b']]['r'];
+			this.ctx.beginPath();
+			this.ctx.moveTo(posA[0], posA[1]);
+			this.ctx.lineTo(posB[0], posB[1]);
+			this.ctx.closePath();
 			this.ctx.stroke();
 		}
 	};
@@ -56,9 +71,9 @@
 			}, false);
 		},
 		loadGraph: function(nodes, links) {
-			this.nodes = [{"x": -50, "y": 4, "px": -10, "py": 4, "vx": 0, "vy": 0, "m": 5, "c": "#000", "data": null}, {"x": 150, "y": 1, "px": 10, "py": 1, "vx": 0, "vy": 0, "m": 5, "c": "#000", "data": null}];
-			this.links = [{"a": 0, "b": 1}];
-			this.computeEngine.postMessage({"cmd": "init", "params": {"nodes": this.nodes, "links": this.links, "width": self.canvas.width, "height": self.canvas.height}});
+			this.nodes = nodes;
+			this.links = links;
+			this.computeEngine.postMessage({"cmd": "init", "params": {"nodes": this.nodes, "links": this.links, "width": 1000, "height": 1000}});
 			this.visEngine.nodes = this.nodes;
 		},
 		update: function(params) {

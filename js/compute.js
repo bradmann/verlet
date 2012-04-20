@@ -1,9 +1,9 @@
-var nodes = [], links = [], forces = [], oldForces = [], quadtree, width, height;
-var theta = .5, coulombConstant = .1, springConstant = .1, damping = .05, timeStep = 1/60, k = 0;
+var nodes = [], links = [], quadtree, width, height, timer;
+var theta = 1, coulombConstant = 10, springConstant = .01, damping = .011, timeStep = 1, k = 0, interval = (1/60) * 1000, temperature = 1, maxVel = 25;
 
-function coulomb(node1, node2) {
-	var x = node1["x"] - node2["x"];
-	var y = node1["y"] - node2["y"];
+function repel1(node1, node2) {
+	var x = node1['r'][0] - node2['r'][0];
+	var y = node1['r'][1] - node2['r'][1];
 	var r = Math.sqrt(x*x + y*y);
 	if (r == 0) {return [0,0];};
 	
@@ -12,33 +12,48 @@ function coulomb(node1, node2) {
 	return [(force * (x/r)), (force * (y/r))];
 }
 
-function hooke(node1, node2) {
-	var x = node1["x"] - node2["x"];
-	var y = node1["y"] - node2["y"];
+function attract1(node1, node2) {
+	var x = node1['r'][0] - node2['r'][0];
+	var y = node1['r'][1] - node2['r'][1];
 	var d = Math.sqrt(x*x + y*y);
-	var force = - springConstant * d;
+	var force = -springConstant * d;
 	
 	return [(force * (x/d)), (force * (y/d))];
 }
 
-function attract(node1, node2) {
-	var x = node1["x"] - node2["x"];
-	var y = node1["y"] - node2["y"];
+function attract(n1, n2) {
+	var x = n1['r'][0] - n2['r'][0];
+	var y = n1['r'][1] - n2['r'][1];
 	var d = Math.sqrt(x*x + y*y);
-	return d*d/k;
+	var f = -d*d/k;
+	
+	return [f * (x/d), f * (y/d)];
 }
 
-function repel(node1, node2) {
-	var x = node1["x"] - node2["x"];
-	var y = node1["y"] - node2["y"];
+function repel(n1, n2) {
+	var x = n1['r'][0] - n2['r'][0];
+	var y = n1['r'][1] - n2['r'][1];
 	var d = Math.sqrt(x*x + y*y);
-	return k*k/d;
+	if (d === 0) {return [0,0];}
+	var f = k*k/d;
+	
+	return [f * (x/d), f * (y/d)];
+}
+
+function fAttract(dist) {
+	return -dist*dist/k;
+}
+
+function fRepel(dist) {
+	if (dist == 0) {return 0;}
+	return k*k/dist;
 }
 
 function quadtree_build() {
-	quadtree = {x:0, y:0, w: width + 10, h: height + 10};
+	quadtree = {'r': [0,0], 'w': width + 10, 'h': height + 10};
 	for (var i=0, l=nodes.length; i < l; i++) {
-		quad_insert(nodes[i], quadtree);
+		var node = nodes[i];
+		quad_insert(node, quadtree);
 	}
 	
 	prune(quadtree);
@@ -74,10 +89,11 @@ function quad_insert(i, n) {
 		var newHeight = n["h"]/2;
 		var offsetX = n["w"]/4;
 		var offsetY = n["h"]/4;
-		n["a"] = {x: (n["x"]-offsetX), y: (n["y"]+offsetY), w: newWidth, h: newHeight};
-		n["b"] = {x: (n["x"]+offsetX), y: (n["y"]+offsetY), w: newWidth, h: newHeight};
-		n["c"] = {x: (n["x"]-offsetX), y: (n["y"]-offsetY), w: newWidth, h: newHeight};
-		n["d"] = {x: (n["x"]+offsetX), y: (n["y"]-offsetY), w: newWidth, h: newHeight};
+		var pos = n['r'];
+		n["a"] = {'r': [(pos[0]-offsetX), (pos[1]+offsetY)], 'w': newWidth, 'h': newHeight};
+		n["b"] = {'r': [(pos[0]+offsetX), (pos[1]+offsetY)], 'w': newWidth, 'h': newHeight};
+		n["c"] = {'r': [(pos[0]-offsetX), (pos[1]-offsetY)], 'w': newWidth, 'h': newHeight};
+		n["d"] = {'r': [(pos[0]+offsetX), (pos[1]-offsetY)], 'w': newWidth, 'h': newHeight};
 		
 		var node = n["val"];
 		get_child(node, n)["val"] = node;
@@ -94,28 +110,31 @@ function quad_insert(i, n) {
 	}
 }
 
-function get_child(i, n) {
-	var newWidth = n["w"]/2;
-	var newHeight = n["h"]/2;
-	var offsetX = n["w"]/4;
-	var offsetY = n["h"]/4;
+function get_child(node, root) {
+	var newWidth = root["w"]/2;
+	var newHeight = root["h"]/2;
+	var offsetX = root["w"]/4;
+	var offsetY = root["h"]/4;
 	
-	if (i["x"] >= (n["a"]["x"] - offsetX) && i["x"] < (n["a"]["x"] + offsetX) && i["y"] >= (n["a"]["y"] - offsetY) && i["y"] < (n["a"]["y"] + offsetY)) {
-		return n["a"];
-	} else if (i["x"] >= (n["b"]["x"] - offsetX) && i["x"] < (n["b"]["x"] + offsetX) && i["y"] >= (n["b"]["y"] - offsetY) && i["y"] < (n["b"]["y"] + offsetY)) {
-		return n["b"];
-	} else if (i["x"] >= (n["c"]["x"] - offsetX) && i["x"] < (n["c"]["x"] + offsetX) && i["y"] >= (n["c"]["y"] - offsetY) && i["y"] < (n["c"]["y"] + offsetY)) {
-		return n["c"];
+	var pos = node['r'];
+	var a = root['a']['r'], b = root['b']['r'], c = root['c']['r'];
+	if (pos[0] >= (a[0] - offsetX) && pos[0] < (a[0] + offsetX) && pos[1] >= (a[1] - offsetY) && pos[1] < (a[1] + offsetY)) {
+		return root['a'];
+	} else if (pos[0] >= (b[0] - offsetX) && pos[0] < (b[0] + offsetX) && pos[1] >= (b[1] - offsetY) && pos[1] < (b[1] + offsetY)) {
+		return root['b'];
+	} else if (pos[0] >= (c[0] - offsetX) && pos[0] < (c[0] + offsetX) && pos[1] >= (c[1] - offsetY) && pos[1] < (c[1] + offsetY)) {
+		return root['c'];
 	} else {
-		return n["d"];
+		return root['d'];
 	}
 }
 
 function compute_mass(n) {
 	if (n && n["val"]) {
-		node = n["val"];
+		var node = n['val'];
+		var pos = node['r'];
 		n["m"] = node["m"];
-		n["cm"] = [node["x"], node["y"]];
+		n["cm"] = [pos[0], pos[1]];
 		return [n["m"], n["cm"]];
 	} else if (n) {
 		var amass = compute_mass(n["a"]);
@@ -136,34 +155,39 @@ function compute_mass(n) {
 
 function vector_add() {
 	var vectorLength = arguments[0].length;
-	var out = [];
+	var out = new Array(vectorLength);
 	for (var i=0; i < vectorLength; i++) {
 		var sum = 0;
 		for (var j=0, l=arguments.length; j < l; j++) {
 			sum += arguments[j][i];
 		}
-		out.push(sum);
+		out[i] = sum;
 	}
 	return out;
 }
 
-function tree_force(i, node) {
-	var particle = nodes[i];
-	if (node["val"]) {
-		var force = coulomb(particle, node["val"]);
-		forces[i] = vector_add(forces[i], force);
+function distance(n1, n2) {
+	var xDist = n1[0] - n2[0];
+	var yDist = n1[1] - n2[1];
+	return Math.sqrt(xDist*xDist + yDist*yDist);
+}
+
+function tree_force(node, root) {
+	if (root['val']) {
+		var force = repel(node, root['val']);
+		node['f'] = vector_add(node['f'], force);
 	} else {
-		var r = Math.sqrt(Math.pow((particle["x"] - node["cm"][0]), 2) + Math.pow((particle["y"] - node["cm"][1]), 2));
-		var D = node["w"];
+		var r = distance(node['r'], root['cm']);
+		var D = root['w'];
 		if (D / r < theta) {
-			var tmpnode = {x: node["cm"][0], y: node["cm"][1], m: node["m"]};
-			var force = coulomb(particle, tmpnode);
-			forces[i] = vector_add(forces[i], force);
+			var tmproot = {'r': [root['cm'][0], root['cm'][1]], 'm': root['m']};
+			var force = repel(node, tmproot);
+			node['f'] = vector_add(node['f'], force);
 		} else {
-			if (node["a"]) { tree_force(i, node["a"]); }
-			if (node["b"]) { tree_force(i, node["b"]); }
-			if (node["c"]) { tree_force(i, node["c"]); }
-			if (node["d"]) { tree_force(i, node["d"]); }
+			if (root['a']) { tree_force(node, root['a']); }
+			if (root['b']) { tree_force(node, root['b']); }
+			if (root['c']) { tree_force(node, root['c']); }
+			if (root['d']) { tree_force(node, root['d']); }
 		}
 	}
 }
@@ -176,33 +200,50 @@ function init(params) {
 }
 
 function start() {
-	k = Math.sqrt(width*height/nodes.length);
+	k = Math.sqrt(width*height/nodes.length) / 4;
+	//Initialize forces to 0
 	for (var i=0, l=nodes.length; i < l; i++) {
-		oldForces[i] = [0,0];
-		forces[i] = [0,0];
+		nodes[i]['f'] = [0,0];
 	}
 	timer = setTimeout(function(){tick()}, 0);
 }
 
-function tick() {
-	var start = (new Date()).getTime();
-	
-	//Build the quadtree
-	quadtree_build();
-	
+function compute_force2() {
 	//Loop through the nodes and compute the force on each node
 	for (var i=0, l=nodes.length; i < l; i++) {
-		var node = nodes[i];
-		var oldF = oldForces[i];
-		var mass = node['m'];
-		node['vx'] = node['vx'] + (oldF[0] * timeStep) / (2 * mass);
-		node['vy'] = node['vy'] + (oldF[1] * timeStep) / (2 * mass);
-		
-		node['x'] = node['x'] + (node['vx'] * timeStep);
-		node['y'] = node['y'] + (node['vy'] * timeStep);
-		
+		if (i == this.selectedNode) {continue; };
+		var node1 = nodes[i];
+		node1['f'] = [0,0];
+		for (var j=0; j < l; j++) {
+			var node2 = nodes[j];
+			node1['f'] = vector_add(node1['f'], repel(node1, node2));
+		}
+	}
+	
+	//Calculate the forces on each of the nodes from the springs
+	for (var i=0, l=links.length; i < l; i++) {
+		var link = links[i];
+		var nodeA = nodes[link["a"]];
+		var nodeB = nodes[link["b"]];
+		if (nodeA !== this.selectedNode) {
+			nodeA['f'] = vector_add(nodeA['f'], attract(nodeA, nodeB));
+		}
+		if (nodeB !== this.selectedNode) {
+			nodeB['f'] = vector_add(nodeB['f'], attract(nodeB, nodeA));
+		}
+	}
+}
+
+function compute_force() {
+	//Build the quadtree
+	quadtree_build();
+
+	//Loop through the nodes and compute the force on each node
+	for (var i=0, l=nodes.length; i < l; i++) {
 		if (i == this.selectedNode || nodes[i]["t"] == "search") {continue; };
-		tree_force(i, quadtree);
+		var node = nodes[i];
+		node['f'] = [0,0];
+		tree_force(node, quadtree);
 	}
 	
 	//Delete the quadtree
@@ -211,15 +252,44 @@ function tick() {
 	//Calculate the forces on each of the nodes from the springs
 	for (var i=0, l=links.length; i < l; i++) {
 		var link = links[i];
-		var nodeA = link["a"];
-		var nodeB = link["b"];
-		if (nodeA !== this.selectedNode && nodes[nodeA]["t"] !== "search") {
-			forces[nodeA] = vector_add(forces[nodeA], hooke(nodes[nodeA], nodes[nodeB]));
+		var nodeA = nodes[link['a']];
+		var nodeB = nodes[link['b']];
+		if (nodeA !== this.selectedNode) {
+			nodeA['f'] = vector_add(nodeA['f'], attract(nodeA, nodeB));
 		}
-		if (nodeB !== this.selectedNode && nodes[nodeB]["t"] !== "search") {
-			forces[nodeB] = vector_add(forces[nodeB], hooke(nodes[nodeB], nodes[nodeA]));
+		if (nodeB !== this.selectedNode) {
+			nodeB['f'] = vector_add(nodeB['f'], attract(nodeB, nodeA));
 		}
 	}
+}
+
+function min(v1, v2) {
+	var d1 = Math.sqrt(v1[0]*v1[0] + v1[1]*v1[1]);
+	var d2 = Math.sqrt(v2[0]*v2[0] + v2[1]*v2[1]);
+	if (d1 < d2) {
+		return v1; 
+	} else {
+		return v2;
+	}
+}
+
+function cool() {
+	temperature = [temperature[0] - 1, temperature[1] - 1];
+}
+
+function speedLimit(vel) {
+	var d = Math.sqrt(vel[0]*vel[0] + vel[1]*vel[1]);
+	if (d > maxVel) {
+		return [maxVel * (vel[0]/d), maxVel * (vel[1]/d)];
+	} else {
+		return vel;
+	}
+}
+
+function tick() {
+	var start = (new Date()).getTime();
+	
+	compute_force();
 
 	var entropy = 0;
 	var maxX = width / 2;
@@ -227,48 +297,38 @@ function tick() {
 	//Use the forces to calculate the velocity/position of the nodes
 	for (var i=0, l=nodes.length; i < l; i++) {
 		var node = nodes[i];
-		//var oldF = oldForces[i];
-		var net = forces[i];
+		var vel = node['v'];
+		var pos = node['r'];
+		var force = node['f'];
 		var mass = node['m'];
 		
-		//var vx = node['vx'] + (oldF[0] * timeStep) / (2 * mass);
-		//var vy = node['vy'] + (oldF[1] * timeStep) / (2 * mass);
-		
-		//node['x'] = node['x'] + (vx * timeStep);
-		//node['y'] = node['y'] + (vy * timeStep);
-		
-		node['vx'] = node['vx'] + (net[0] * timeStep) / (2 * mass);
-		node['vy'] = node['vy'] + (net[1] * timeStep) / (2 * mass);
-		
-		oldForces[i] = [net[0], net[1]];
-		
-		entropy += Math.abs(node['vx']/(l*2)) + Math.abs(node['vy']/(l*2));
-		
-		/*
 		// Calculate node velocity
-		node["vx"] = (node["vx"] + (timeStep * net[0])) * damping;
-		node["vy"] = (node["vy"] + (timeStep * net[1])) * damping;
+		vel[0] = (vel[0] + (timeStep * force[0])) * damping;
+		vel[1] = (vel[1] + (timeStep * force[1])) * damping;
 		
-		entropy += Math.abs(node['vx']/(l*2)) + Math.abs(node['vy']/(l*2));
+		entropy += Math.sqrt(vel[0]*vel[0] + vel[1]*vel[1]);
+		
+		vel = speedLimit(vel);
 		
 		// Calculate node position
-		node["x"] = node["x"] + (timeStep * node["vx"]);
-		if (node["x"] > maxX || node["x"] < -maxX) {
-			this.width = Math.abs(node["x"]) * 2;
+		pos[0] = pos[0] + (timeStep * vel[0]);
+		if (pos[0] > maxX || pos[0] < -maxX) {
+			width = width * 2;
+			postMessage({"cmd": "log", "params": {"message": "newWidth: " + width}});
 		}
 		
-		node["y"] = node["y"] + (timeStep * node["vy"]);
-		if (node["y"] > maxY || node["y"] < -maxY) {
-			this.height = Math.abs(node["y"]) * 2;
+		pos[1] = pos[1] + (timeStep * vel[1]);
+		if (pos[1] > maxY || pos[1] < -maxY) {
+			height = height * 2;
+			postMessage({"cmd": "log", "params": {"message": "newHeight: " + height}});
 		}
-		*/
 	}
 	
 	postMessage({"cmd": "update", "params": {"nodes": nodes, "links": links}});
 	
-	if (entropy > 0) {
-		var wait = this.interval - ((new Date()).getTime() - start);
-		this.timer = setTimeout(function(){tick();}, wait);
+	if (entropy / l > .15) {
+		var wait = interval - ((new Date()).getTime() - start);
+		timer = setTimeout(tick, wait);
 	}
 }
 
