@@ -1,5 +1,5 @@
 var nodes = [], links = [], quadtree, width, height, timer;
-var theta = 1, coulombConstant = 10, springConstant = .01, damping = .011, timeStep = 1, k = 0, interval = (1/60) * 1000, temperature = 1, maxVel = 25;
+var theta = 1, coulombConstant = 10, springConstant = .01, damping = .3, timeStep = 1, k = 0, interval = (1/30) * 1000, temperature = 1, maxVel = 30, selectedIdx = -1, steadyState = .1, lowEntropy = 0;
 
 function repel1(node1, node2) {
 	var x = node1['r'][0] - node2['r'][0];
@@ -33,9 +33,11 @@ function attract(n1, n2) {
 function repel(n1, n2) {
 	var x = n1['r'][0] - n2['r'][0];
 	var y = n1['r'][1] - n2['r'][1];
+	var m1 = n1['m'];
+	var m2 = n2['m'];
 	var d = Math.sqrt(x*x + y*y);
 	if (d === 0) {return [0,0];}
-	var f = k*k/d;
+	var f = k*k*(m1 + m2)/d;
 	
 	return [f * (x/d), f * (y/d)];
 }
@@ -200,7 +202,7 @@ function init(params) {
 }
 
 function start() {
-	k = Math.sqrt(width*height/nodes.length) / 4;
+	k = Math.sqrt(width*height/nodes.length) / 8;
 	//Initialize forces to 0
 	for (var i=0, l=nodes.length; i < l; i++) {
 		nodes[i]['f'] = [0,0];
@@ -240,9 +242,10 @@ function compute_force() {
 
 	//Loop through the nodes and compute the force on each node
 	for (var i=0, l=nodes.length; i < l; i++) {
-		if (i == this.selectedNode || nodes[i]["t"] == "search") {continue; };
+		//if (i == this.selectedNode || nodes[i]["t"] == "search") {continue; };
 		var node = nodes[i];
 		node['f'] = [0,0];
+		if (node['fixed']) {continue;}
 		tree_force(node, quadtree);
 	}
 	
@@ -254,10 +257,10 @@ function compute_force() {
 		var link = links[i];
 		var nodeA = nodes[link['a']];
 		var nodeB = nodes[link['b']];
-		if (nodeA !== this.selectedNode) {
+		if (!nodeA['fixed']) {
 			nodeA['f'] = vector_add(nodeA['f'], attract(nodeA, nodeB));
 		}
-		if (nodeB !== this.selectedNode) {
+		if (!nodeB['fixed']) {
 			nodeB['f'] = vector_add(nodeB['f'], attract(nodeB, nodeA));
 		}
 	}
@@ -274,7 +277,7 @@ function min(v1, v2) {
 }
 
 function cool() {
-	temperature = [temperature[0] - 1, temperature[1] - 1];
+	maxVel -= .005;
 }
 
 function speedLimit(vel) {
@@ -309,6 +312,7 @@ function tick() {
 		entropy += Math.sqrt(vel[0]*vel[0] + vel[1]*vel[1]);
 		
 		vel = speedLimit(vel);
+		//cool();
 		
 		// Calculate node position
 		pos[0] = pos[0] + (timeStep * vel[0]);
@@ -326,10 +330,75 @@ function tick() {
 	
 	postMessage({"cmd": "update", "params": {"nodes": nodes, "links": links}});
 	
-	if (entropy / l > .15) {
-		var wait = interval - ((new Date()).getTime() - start);
-		timer = setTimeout(tick, wait);
+	if (entropy / l < steadyState) {
+		lowEntropy++;
+	} else {
+		lowEntropy = 0;
 	}
+	if (lowEntropy < 5 && maxVel > 0) {
+		var wait = interval - ((new Date()).getTime() - start);
+		if (wait < 0) {wait = 0;}
+		timer = setTimeout(tick, wait);
+	} else {
+		timer = null;
+		postMessage({"cmd": "log", "params": {"message": "simulation complete"}});
+		//postMessage({"cmd": "update", "params": {"nodes": nodes, "links": links}});
+	}
+}
+
+function getNodeIdxAtCoords(coords) {
+	var x = coords[0];
+	var y = coords[1];
+	for (var i=0, l=nodes.length; i < l; i++) {
+		var node = nodes[i];
+		var pos = node['r'];
+		var mass = node['m'];
+		var xMin = pos[0] - mass;
+		var xMax = pos[0] + mass;
+		var yMin = pos[1] - mass;
+		var yMax = pos[1] + mass;
+		if (xMin <= x && xMax >= x && yMin <= y && yMax >= y) {
+			return i;
+		}
+	}
+	return null;
+}
+
+function mousedown(params) {
+	var coords = params['coords'];
+	var idx = getNodeIdxAtCoords(coords);
+	if (idx === null) {return;}
+	var node = nodes[idx];
+	node['fixed'] = true;
+	selectedIdx = idx;
+}
+
+function mouseup(params) {
+	if (selectedIdx != -1) {
+		delete nodes[selectedIdx]['fixed'];
+		selectedIdx = -1;
+	}
+}
+
+function drag(params) {
+	if (selectedIdx != -1) {
+		var x = params['coords'][0];
+		var y = params['coords'][1];
+		var node = nodes[selectedIdx];
+		node['r'][0] = x;
+		node['r'][1] = y;
+		if (!timer) {
+			start();
+		}
+	}
+}
+
+function pin(params) {
+	var coords = params['coords'];
+	var idx = getNodeIdxAtCoords(coords);
+	if (idx === null) {return;}
+	var node = nodes[idx];
+	node['fixed'] = true;
 }
 
 addEventListener('message', function(evt){
